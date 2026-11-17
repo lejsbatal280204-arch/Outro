@@ -15,7 +15,7 @@ from PIL import Image, ImageFilter
 
 W, H = 1080, 1920
 FPS = 30
-DUR = 5.0
+DUR = 3.5
 N = int(FPS * DUR)
 SR = 48000
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -55,19 +55,16 @@ def blur(arr, r):
 
 
 # ---------------------------------------------------------------- logo prep
-src = np.asarray(Image.open(os.path.join(HERE, "assets", "logo.png")).convert("RGB"))
+# 4000x4000 export of the "Logo" design from Canva (page 1)
+src = np.asarray(Image.open(os.path.join(HERE, "assets", "logo_hr.png")).convert("RGB"))
 # crop to the logo content (found by analysing the PNG)
-x0, x1, y0, y1 = 20, 476, 200, 346
+x0, x1, y0, y1 = 160, 3808, 1600, 2768
 crop = src[y0:y1, x0:x1]
-SPLIT = 298 - y0  # row between wordmark and "CAR DETAILING"
+SPLIT = 2386 - y0  # row between wordmark and "CAR DETAILING"
 
-SCALE = 2.05
-UP = 4
-big = Image.fromarray(crop).resize((crop.shape[1] * UP, crop.shape[0] * UP), Image.LANCZOS)
-big = np.asarray(big, dtype=np.float32) / 255.0
+SCALE = 2.05 / 8
+big = np.asarray(crop, dtype=np.float32) / 255.0
 a_big = big.max(axis=2)
-# re-sharpen the edges after upscaling (logo is only 500px)
-a_big = smooth(0.28, 0.72, a_big)
 col_big = np.where(a_big[..., None] > 1e-3, clamp01(big / np.maximum(big.max(2, keepdims=True), 1e-3)), 1.0)
 
 lw, lh = int(crop.shape[1] * SCALE), int(crop.shape[0] * SCALE)
@@ -169,18 +166,38 @@ SPRITES = {i: sprite(s) for i, s in enumerate(ps)}
 RED_C = np.array([0.95, 0.12, 0.14], np.float32)
 
 # ---------------------------------------------------------------- timeline (s)
-T_STREAK0, T_STREAK1 = 0.25, 1.15     # light streak / wordmark reveal
-T_POP = 1.15                          # red accent pop
-T_SUB0 = 1.35                         # letters of CAR DETAILING
-T_LINE0, T_LINE1 = 1.55, 2.35         # thin lines grow
-T_SHINE0, T_SHINE1 = 2.45, 3.25       # gloss sweep
-T_SPARK = 3.15                        # sparkle on the X
+T_STREAK0, T_STREAK1 = 0.10, 0.75     # light streak / wordmark reveal
+T_POP = 0.75                          # red accent pop
+T_SUB0 = 0.85                         # letters of CAR DETAILING
+T_LINE0, T_LINE1 = 1.05, 1.65         # thin lines grow
+T_SHINE0, T_SHINE1 = 1.35, 1.95       # gloss sweep
+T_SPARK = 1.85                        # sparkle on the X
+T_CTA = 1.75                          # "FOLGE FÜR MEHR"
+
+# call to action, rendered per frame with animated letter tracking
+from PIL import ImageDraw, ImageFont
+CTA_TEXT = "FOLGE FÜR MEHR"
+CTA_FONT = ImageFont.truetype("/usr/share/fonts/opentype/inter/InterDisplay-Medium.otf", 44)
+
+
+def cta_layer(e):
+    """Alpha mask of the CTA text; e in [0,1] drives tracking (wide -> tight)."""
+    track = 14 + (1 - e) * 26
+    widths = [CTA_FONT.getlength(ch) for ch in CTA_TEXT]
+    total = sum(widths) + track * (len(CTA_TEXT) - 1)
+    im = Image.new("L", (W, 120), 0)
+    d = ImageDraw.Draw(im)
+    x = (W - total) / 2
+    for ch, w_ in zip(CTA_TEXT, widths):
+        d.text((x, 30), ch, font=CTA_FONT, fill=255)
+        x += w_ + track
+    return np.asarray(im, np.float32) / 255.0, total
 
 
 def render(i):
     t = i / FPS
     img = BG.copy()
-    bg_in = smooth(0.0, 0.6, t)
+    bg_in = smooth(0.0, 0.35, t)
     img *= bg_in
 
     # ---- light streak + reveal edge
@@ -221,7 +238,7 @@ def render(i):
     # ---- red accent pop
     if t > T_POP - 0.1:
         k = t - T_POP
-        pulse = math.exp(-((k) / 0.12) ** 2) if k < 0 else math.exp(-k / 0.35)
+        pulse = math.exp(-((k) / 0.08) ** 2) if k < 0 else math.exp(-k / 0.3)
         breathe = 0.12 + 0.05 * math.sin(t * 3.0)
         img += (RED_GLOW * (1.6 * pulse + breathe))[..., None] * RED_C
         img += (RED_GLOW_XL * (1.2 * pulse + 0.15))[..., None] * RED_C * 0.8
@@ -235,7 +252,7 @@ def render(i):
     sub_layer = np.zeros((H, W), np.float32)
     sub_shift = np.zeros(1)
     for j, (a, b) in enumerate(letters):
-        lt = (t - T_SUB0 - j * 0.045) / 0.45
+        lt = (t - T_SUB0 - j * 0.03) / 0.35
         if lt <= 0:
             continue
         e = ease_out_expo(lt)
@@ -260,15 +277,21 @@ def render(i):
         dot = np.exp(-(((xx - W / 2) ** 2 + (yy - ly) ** 2) / (2 * 3.2 ** 2))) * lp
         img += (dot * 1.4)[..., None] * RED_C
 
-    # ---- reflection on the "floor"
-    refl_src = (word_a * CHROME * 0.9 + sub_layer * 0.9)
-    top, bot = LY, SUB_BOT + 4
-    seg = refl_src[top:bot][::-1]
-    ry0 = FLOOR_Y + 14
-    ry1 = min(ry0 + seg.shape[0], H)
-    seg = seg[: ry1 - ry0]
-    fade = np.exp(-np.arange(seg.shape[0]) / 70.0)[:, None] * 0.16
-    img[ry0:ry1] += (seg * fade)[..., None]
+    # ---- call to action under the line
+    ce = ease_out_expo((t - T_CTA) / 0.7)
+    if ce > 0:
+        m, tw = cta_layer(ce)
+        cy0 = FLOOR_Y + 50
+        rise = int(round((1 - ce) * 18))
+        a_ = m * min(1.0, (t - T_CTA) / 0.35)
+        img[cy0 + rise:cy0 + rise + 120] = img[cy0 + rise:cy0 + rise + 120] * (1 - a_[..., None]) + a_[..., None] * 0.95
+        # red underline growing from the centre
+        uy = cy0 + rise + 104
+        half = ce * tw * 0.18
+        d = np.abs(xx[0] - W / 2)
+        ul = clamp01((half - d) / 3.0)
+        img[uy:uy + 3] += ul[None, :, None] * RED_C * 1.1
+        img[uy - 14:uy + 17] += (blur(np.pad(ul[None, :].repeat(3, 0), ((14, 14), (0, 0))), 4) * 0.8)[..., None] * RED_C
 
     # ---- sparkle star on the X
     sk = t - T_SPARK
@@ -349,6 +372,10 @@ def synth_audio(path):
     for f, d0 in [(2093, 0.0), (2637, 0.06), (3136, 0.12), (4186, 0.2), (3520, 0.7)]:
         x = t - (T_SHINE0 + d0)
         out += np.sin(2 * np.pi * f * x) * env(T_SHINE0 + d0, 0.005, 0.5) * 0.06
+    # CTA: soft airy whoosh + pling
+    x = t - T_CTA
+    out += np.sin(2 * np.pi * 1568 * x) * env(T_CTA + 0.05, 0.004, 0.35) * 0.07
+    out += np.sin(2 * np.pi * 2349 * x) * env(T_CTA + 0.12, 0.004, 0.45) * 0.05
     # low pad
     pad = (np.sin(2 * np.pi * 55 * t) + 0.5 * np.sin(2 * np.pi * 82.5 * t) + 0.3 * np.sin(2 * np.pi * 110.3 * t))
     out += pad * smooth(T_POP, T_POP + 1.0, t) * (1 - smooth(DUR - 1.0, DUR, t)) * 0.08
