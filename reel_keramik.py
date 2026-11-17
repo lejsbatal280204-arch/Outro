@@ -87,22 +87,40 @@ def caption_groups():
 
 GROUPS = caption_groups()
 
+# ---------------------------------------------------------------- word anchors (voice-over seconds)
+def _norm(x):
+    return x.lower().strip(",.:!?–-")
+
+
+def at(word, after=0.0, lead=0.0):
+    """Start time (VO seconds) of the first spoken `word` after `after`."""
+    for w in words:
+        if w["start"] >= after - 1e-3 and _norm(w["text"]) == _norm(word):
+            return max(0.0, w["start"] - lead)
+    raise KeyError(word)
+
+
+T_EINS = at("Eins", lead=0.15)
+T_VOR = at("Vorteile", lead=0.3)
+T_NACH = at("Nachteile", lead=0.3)
+T_WAS = at("Was", after=at("Profi-Tipp"), lead=0.1)
+
 # ---------------------------------------------------------------- scenes (voice-over seconds)
 SCENES = [
     dict(t0=0.0,   img="car.png",    kind="hook", pan=(0.05, 0.40)),
-    dict(t0=4.80,  img="apply.png",  kind="fact", n="01", title="CHEMISCHE\nBINDUNG", sub="Liegt nicht nur drauf wie Wachs", pan=(0.30, 0.55)),
-    dict(t0=10.10, img="gloss.jpg",  kind="big",  n="02", big="1–5", title="JAHRE SCHUTZ", sub="Wachs: nur ein paar Wochen"),
-    dict(t0=14.50, img="beads.png",  kind="fact", n="03", title="WASSER\nPERLT AB", sub="Schmutz haftet kaum – schneller waschen", pan=(0.20, 0.45)),
-    dict(t0=20.05, img="autumn.jpg", kind="fact", n="04", title="SCHUTZ VOR", sub="UV · Vogelkot · Baumharz · Streusalz"),
-    dict(t0=25.96, img="swirl.jpg",  kind="fact", n="05", title="NICHT\nKRATZFEST", sub="Waschkratzer bleiben möglich"),
-    dict(t0=30.65, img="car.png",    kind="list", title="VORTEILE", good=True, pan=(0.75, 0.50),
-         items=[("Mega Glanz", 31.84), ("Mehr Farbtiefe", 32.92), ("Weniger Pflegeaufwand", 34.24)]),
-    dict(t0=36.00, img="polish.jpg", kind="list", title="NACHTEILE", good=False,
-         items=[("Aufwendige Vorbereitung", 37.04), ("Lack muss perfekt\npoliert sein", 38.88), ("Teurer als Wachs", 41.04)]),
-    dict(t0=43.12, img="wash.jpg",   kind="big",  n="TIPP", big="7", title="TAGE KEINE\nWASCHANLAGE", sub="Danach pH-neutrales Shampoo"),
-    dict(t0=46.80, img="apply.png",  kind="cta",  pan=(0.70, 0.75)),
+    dict(t0=T_EINS, img="apply.png",  kind="fact", n="01", title="CHEMISCHE\nBINDUNG", sub="Liegt nicht nur drauf wie Wachs", pan=(0.30, 0.55)),
+    dict(t0=at("Zwei", lead=0.1), img="gloss.jpg",  kind="big",  n="02", big="1–5", title="JAHRE SCHUTZ", sub="Wachs: nur ein paar Wochen"),
+    dict(t0=at("Drei", lead=0.1), img="beads.png",  kind="fact", n="03", title="WASSER\nPERLT AB", sub="Schmutz haftet kaum – schneller waschen", pan=(0.20, 0.45)),
+    dict(t0=at("Vier", lead=0.1), img="autumn.jpg", kind="fact", n="04", title="SCHUTZ VOR", sub="UV · Vogelkot · Baumharz · Streusalz"),
+    dict(t0=at("Fünf", after=at("Vier"), lead=0.1), img="swirl.jpg",  kind="fact", n="05", title="NICHT\nKRATZFEST", sub="Waschkratzer bleiben möglich"),
+    dict(t0=T_VOR, img="car.png",    kind="list", title="VORTEILE", good=True, pan=(0.75, 0.50),
+         items=[("Mega Glanz", at("Mega", T_VOR)), ("Mehr Farbtiefe", at("mehr", T_VOR)), ("Weniger Pflegeaufwand", at("viel", T_VOR))]),
+    dict(t0=T_NACH, img="polish.jpg", kind="list", title="NACHTEILE", good=False,
+         items=[("Aufwendige Vorbereitung", at("Vorbereitung", T_NACH)), ("Lack muss perfekt\npoliert sein", at("der", T_NACH)), ("Teurer als Wachs", at("kostet", T_NACH))]),
+    dict(t0=at("Profi-Tipp", lead=0.1), img="wash.jpg",   kind="big",  n="TIPP", big="7", title="TAGE KEINE\nWASCHANLAGE", sub="Danach pH-neutrales Shampoo"),
+    dict(t0=T_WAS, img="apply.png",  kind="cta",  pan=(0.70, 0.75)),
 ]
-VO_END = 51.52
+VO_END = words[-1]["end"]
 for i, s in enumerate(SCENES):
     s["a"] = 0.0 if i == 0 else vt(s["t0"])
     s["b"] = vt(SCENES[i + 1]["t0"]) if i + 1 < len(SCENES) else vt(VO_END) + 0.6
@@ -224,10 +242,10 @@ def overlay(scene, t):
     kind = scene["kind"]
 
     if kind == "hook":
-        e1, e2, e3 = pop(t, 0.15, 0.45), pop(t, 0.45, 0.45), pop(t, vt(3.0), 0.4)
+        e1, e2, e3 = pop(t, 0.15, 0.45), pop(t, 0.45, 0.45), pop(t, vt(at("Hier")), 0.4)
         draw_text(L, (LX, 360 - 40 * (1 - e1)), "KERAMIK-", F_HOOK, WHITE, alpha=e1)
         draw_text(L, (LX, 480 - 40 * (1 - e2)), "VERSIEGELUNG", F_HOOK, WHITE, alpha=e2)
-        draw_text(L, (LX, 640), "Lohnt sich das?", F_HOOK_SUB, WHITE, alpha=pop(t, vt(1.5)))
+        draw_text(L, (LX, 640), "Lohnt sich das?", F_HOOK_SUB, WHITE, alpha=pop(t, vt(at("lohnt"))))
         if e3 > 0:
             w = text_w(F_NUM, "5 FAKTEN") + 56
             x0 = LX
@@ -270,7 +288,7 @@ def overlay(scene, t):
             y = max(y + 140, yy_ + 40)
 
     elif kind == "cta":
-        e1, e2, e3 = pop(k, 0.0, 0.4), pop(t, vt(48.6), 0.4), pop(t, vt(49.9), 0.4)
+        e1, e2, e3 = pop(k, 0.0, 0.4), pop(t, vt(at("Schreib", T_WAS)), 0.4), pop(t, vt(at("du", T_WAS)), 0.4)
         draw_text(L, (W / 2, 420 - 30 * (1 - e1)), "WAS KOSTET'S", F_TITLE, WHITE, "ma", e1)
         draw_text(L, (W / 2, 520 - 30 * (1 - e1)), "FÜR DEIN AUTO?", F_TITLE, WHITE, "ma", e1)
         if e2 > 0:
